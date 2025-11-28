@@ -258,46 +258,27 @@ void loop()
                 // M5.Display.printf(">> %s\n", asr_result.c_str()); 
                 addLog(asr_result.c_str(), TFT_YELLOW); // 検出した文字を表示
 
-                // if (asr_result == " echo"){ 
-                //     addLog("ECHO", TFT_GREENYELLOW);
-                //     module_llm.melotts.inference(melotts_work_id, "ECHO.ECHO",2000);
-                    
-                //     // グローバルのmsgを使用
-                //     msg.data = 10;
-                //     RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
-                //     addLog("Topic sent: 10", TFT_CYAN);
-                // }
 
-                // if (asr_result == " yes"){ 
-                //     addLog("yes");
-                //     module_llm.melotts.inference(melotts_work_id, "yeah. very good. ",2000);
-                    
-                //     msg.data = 20;  // 値を変えて区別できるようにする
-                //     RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
-                //     addLog("Topic sent: 20", TFT_CYAN);
-                //     delay(500);
-                // }
+                for (int i = 0; i < NUM_COMMANDS; i++) { // キーワードごとの処理を実行
+                    if (asr_result == command_table[i].name) {
 
-for (int i = 0; i < NUM_COMMANDS; i++) {
-    if (asr_result == command_table[i].name) {
+                        addLog(command_table[i].log_text); // ログ記述
 
-        addLog(command_table[i].log_text);
+                        module_llm.melotts.inference( // 声で知らせる
+                            melotts_work_id,
+                            command_table[i].tts_file,
+                            2000
+                        );
 
-        module_llm.melotts.inference(
-            melotts_work_id,
-            command_table[i].tts_file,
-            2000
-        );
+                        msg.data = command_table[i].value;
+                        RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL)); // topicの送信
 
-        msg.data = command_table[i].value;
-        RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
+                        addLog(String("Topic sent: ") + msg.data, TFT_CYAN);
+                        delay(500);
 
-        addLog(String("Topic sent: ") + msg.data, TFT_CYAN);
-        delay(500);
-
-        break;
-    }
-}
+                        break;
+                    }
+                }
             }
         }
     }
