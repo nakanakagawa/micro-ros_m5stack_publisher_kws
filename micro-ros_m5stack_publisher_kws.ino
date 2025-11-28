@@ -48,6 +48,29 @@ int lines_per_screen = 7;  // 下半分に入る行数
 // ============================
 
 
+
+// ============ 命令 ==============
+struct Command {  // 構造体を定義
+    const char* name;      // キーワード
+    const char* log_text;  // 表示メッセージ
+    const char* tts_file;  // 音声メッセージ
+    int value;             // topicの値
+};
+// 定義した構造体の配列をつくる
+const Command command_table[] = { // キーワードのリスト
+    { " go",    "GO!!!",          "go.go",        11  }, // キーワード，表示，音声，トピック
+    { " stop",  "STOP!!",         "stop.stop",    0   }, // キーワードを指定する際，キーワードの前に空白を入れないと →
+    { " wait",  "WAIT!!",         "wait.wait",    0   }, // 認識をしてくれないため注意
+    { " right", "turn right!!",   "turn right",   3   },
+    { " left",  "turn left!!",    "turn left",    4   },
+    { " back",  "stop and back!!","back",         10  },
+    { " slow",  "SLOW !!",        "slow.slow",    1   },
+    { " dance", "DANCING",        "dancing",      6   }
+};
+const int NUM_COMMANDS = sizeof(command_table) / sizeof(command_table[0]);
+// ================================
+
+
 // #defineはマクロ定義．右のをマクロ名に置き換え．
 #define RCCHECK(fn) { rcl_ret_t temp_rc = fn; if((temp_rc != RCL_RET_OK)){error_loop();}} // C言語の簡略エラーチェック
 #define RCSOFTCHECK(fn) { rcl_ret_t temp_rc = fn; if((temp_rc != RCL_RET_OK)){}} // fn の実行結果がエラーだったら error_loop() を呼び出す
@@ -183,7 +206,7 @@ void setup()
     }
 
 
-    // Setup ASR
+    // Setup ASR 
     m5_module_llm::ApiAsrSetupConfig_t asr_config;
     asr_config.input = {"sys.pcm", kws_work_id};
     asr_work_id = module_llm.asr.setup(asr_config, "asr_setup", "en_US");
@@ -207,7 +230,7 @@ void setup()
  
     addLog("junbe kanryou!", TFT_GREEN);
     /* TTSで音声出力（10秒タイムアウト） */ 
-    // module_llm.melotts.inference(melotts_work_id, "junvie kannriyoh!", 5000);
+    module_llm.melotts.inference(melotts_work_id, "OK!", 5000);
 }
 
 
@@ -235,30 +258,46 @@ void loop()
                 // M5.Display.printf(">> %s\n", asr_result.c_str()); 
                 addLog(asr_result.c_str(), TFT_YELLOW); // 検出した文字を表示
 
-                if (asr_result == " echo"){ 
-                    addLog("ECHO", TFT_GREENYELLOW);
-                    module_llm.melotts.inference(melotts_work_id, "ECHO.ECHO",2000);
+                // if (asr_result == " echo"){ 
+                //     addLog("ECHO", TFT_GREENYELLOW);
+                //     module_llm.melotts.inference(melotts_work_id, "ECHO.ECHO",2000);
                     
-                    // グローバルのmsgを使用
-                    msg.data = 10;
-                    RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
-                    addLog("Topic sent: 10", TFT_CYAN);
-                }
-
-                if (asr_result == " yes"){ 
-                    addLog("yes");
-                    module_llm.melotts.inference(melotts_work_id, "yeah. very good. ",2000);
-                    
-                    msg.data = 20;  // 値を変えて区別できるようにする
-                    RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
-                    addLog("Topic sent: 20", TFT_CYAN);
-                    delay(500);
-                }
-
-                // if (asr_result == " hello"){ // OKと一致
-                //   addLog("hello");
-                //   module_llm.melotts.inference(melotts_work_id, "yeah. good ",8000);
+                //     // グローバルのmsgを使用
+                //     msg.data = 10;
+                //     RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
+                //     addLog("Topic sent: 10", TFT_CYAN);
                 // }
+
+                // if (asr_result == " yes"){ 
+                //     addLog("yes");
+                //     module_llm.melotts.inference(melotts_work_id, "yeah. very good. ",2000);
+                    
+                //     msg.data = 20;  // 値を変えて区別できるようにする
+                //     RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
+                //     addLog("Topic sent: 20", TFT_CYAN);
+                //     delay(500);
+                // }
+
+for (int i = 0; i < NUM_COMMANDS; i++) {
+    if (asr_result == command_table[i].name) {
+
+        addLog(command_table[i].log_text);
+
+        module_llm.melotts.inference(
+            melotts_work_id,
+            command_table[i].tts_file,
+            2000
+        );
+
+        msg.data = command_table[i].value;
+        RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
+
+        addLog(String("Topic sent: ") + msg.data, TFT_CYAN);
+        delay(500);
+
+        break;
+    }
+}
             }
         }
     }
@@ -274,11 +313,16 @@ void loop()
         int max_scroll = max(0, (int)logs.size() - lines_per_screen);
         scroll_index = min(max_scroll, scroll_index + 1);
         drawLogs();
+        
     }
-    // テスト：Bボタンで新しいログ追加
+    // テスト：Bボタンで🐢停止
     if (M5.BtnB.wasPressed()) {
         static int n = 0;
         addLog("Log %d", n++);
+        msg.data = 0;  // 停止！！！
+        RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
+        addLog("Topic sent: 0", TFT_CYAN);
+        delay(500);
     }
     // RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
     module_llm.msg.responseMsgList.clear();
