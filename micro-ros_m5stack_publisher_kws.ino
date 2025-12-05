@@ -48,7 +48,6 @@ int lines_per_screen = 7;  // 下半分に入る行数
 // ============================
 
 
-
 // ============ 命令 ==============
 struct Command {  // 構造体を定義
     const char* name;      // キーワード
@@ -63,9 +62,10 @@ const Command command_table[] = { // キーワードのリスト
     { " wait",  "WAIT!!",         "wait.wait",    0   }, // 認識をしてくれないため注意
     { " right", "turn right!!",   "turn right",   3   },
     { " left",  "turn left!!",    "turn left",    4   },
-    { " back",  "stop and back!!","back",         10  },
+    { " back",  "BACK!!",         "back.back",    10  },
     { " slow",  "SLOW !!",        "slow.slow",    1   },
-    { " dance", "DANCING",        "dancing",      6   }
+    { " dance", "DANCING",        "dancing",      6   },
+    { " spin",  "SPIN!",          "spin.spin",    99  }  // 一回転する
 };
 const int NUM_COMMANDS = sizeof(command_table) / sizeof(command_table[0]);
 // ================================
@@ -136,6 +136,7 @@ bool initMicroROS() { // pub設定
 }
 
 
+
 void setup()
 {
     M5.begin();
@@ -165,7 +166,13 @@ void setup()
 
 
     // ===== micro-ROS接続 =====
+  int target_agent = 0; // 0 = PC ; 1= Jetson
+
+  if (target_agent == 0) {
     set_microros_wifi_transports("Buffalo-2G-0768", "h33833p5wu8k6", "192.168.11.16", 8888);
+  } else if (target_agent == 1) {
+    set_microros_wifi_transports("GL-AR750S-064", "goodlife", "192.168.8.233", 8888);
+  }
 
 
     // Wi-Fi接続待機（確実に接続完了を待つ）📡
@@ -177,7 +184,7 @@ void setup()
     }
     addLog("Wi-Fi ready");
 
-    delay(2000);
+    // delay(2000);
 
 
     // =====  micro-ROS 初期化 ===== ⚡
@@ -230,7 +237,7 @@ void setup()
  
     addLog("junbe kanryou!", TFT_GREEN);
     /* TTSで音声出力（10秒タイムアウト） */ 
-    module_llm.melotts.inference(melotts_work_id, "OK!", 5000);
+    // module_llm.melotts.inference(melotts_work_id, "OK!", 5000);
 }
 
 
