@@ -34,7 +34,7 @@ void UIManager::begin() {
     M5.Display.setTextSize(2);
     M5.Display.setTextColor(BLACK);
     M5.Display.setCursor(100, y1+12);
-    M5.Display.print("Keyword");
+    M5.Display.print("Command");
     M5.Display.drawRect(80, y1+28, 240, UI_KEYWORD_H-28, WHITE);
 
     // 状態表示[左下] x:10-70 y:95-155

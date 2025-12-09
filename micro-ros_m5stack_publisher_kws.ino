@@ -12,7 +12,7 @@
 extern const unsigned char micro_white[];
 extern const unsigned int micro_white_len;
 
-
+// UI関係
 UIManager ui;
 
 
@@ -128,15 +128,15 @@ void initLoadingBar(int steps) {
     M5.Display.drawRect(barX, barY, barW, barH, GREEN); // 外枠だけ描く
     // ここで一度だけ Now Loading を表示（固定）
     drawLoadingText("Now Loading...");
-
 }
 
-// ローディング中ログ
+
+// ローディング中 左下ログ
 void drawMiniLog(String msg) {
     miniLog = msg;
 
     int x = 5;
-    int y = 220;   // 左下
+    int y = 220;   
     int w = 310;
     int h = 30;
 
@@ -235,6 +235,7 @@ void setup()
     // setTextScroll(); // テキスト設定
     // addLog("Voice ROS Pub", TFT_CYAN); 
     drawLoadingBarStep("Check ModuleLLM connection..");
+
     // ===== Module LLM 初期化 =====
     int rxd = M5.getPin(m5::pin_name_t::port_c_rxd);
     int txd = M5.getPin(m5::pin_name_t::port_c_txd);
@@ -259,14 +260,13 @@ void setup()
 drawLoadingBarStep("micro-ROS connection..");
 
     // ===== micro-ROS接続 =====
-  int target_agent = 0
-  ; // 0 = PC ; 1= Jetson
+    int target_agent = 0; // 0 = PC ; 1= Jetson
 
-  if (target_agent == 0) {
-    set_microros_wifi_transports("Buffalo-2G-0768", "h33833p5wu8k6", "192.168.11.16", 8888);
-  } else if (target_agent == 1) {
-    set_microros_wifi_transports("GL-AR750S-064", "goodlife", "192.168.8.233", 8888);
-  }
+    if (target_agent == 0) {
+        set_microros_wifi_transports("Buffalo-2G-0768", "h33833p5wu8k6", "192.168.11.16", 8888);
+    } else if (target_agent == 1) {
+        set_microros_wifi_transports("GL-AR750S-064", "goodlife", "192.168.8.233", 8888);
+    }
 
 drawLoadingBarStep("Wi-Fi connection..");
     // Wi-Fi接続待機（確実に接続完了を待つ）📡
@@ -343,7 +343,6 @@ drawLoadingBarStep("Setup Audio mdule..");
     // addLog("junbe kanryou!", TFT_GREEN);
     /* TTSで音声出力（10秒タイムアウト） */ 
     // module_llm.melotts.inference(melotts_work_id, "OK!", 5000);
-    drawLogs();
     ui.begin();
 
     ui.updateStatus(true);
@@ -436,7 +435,7 @@ void loop()
     }
     // Bボタン離したとき
     if (M5.BtnB.wasReleased()) {
-    ui.drawStopButton(false);  // 白に戻す
+        ui.drawStopButton(false);  // 白に戻す
     }
 
     // RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
