@@ -160,12 +160,6 @@ void drawLoadingBarStep(String logMessage) {
     drawMiniLog(logMessage);
 }
 
-// KWSを停止，起動する関数
-void sendKwsCommand(const String& workId, const String& action) {
-    String cmd = "{\"request_id\":\"2\",\"work_id\":\"" + workId +
-                 "\",\"action\":\"" + action + "\"}";
-    Serial2.println(cmd);
-}
 
 // ASRを停止，起動する関数
 void sendAsrCommand(const String& workId, const String& action) {
@@ -306,21 +300,6 @@ drawLoadingBarStep("LLM module connection..");
     }
 drawLoadingBarStep("KWS setup..");
 
-
-
-    // ===== KWSセットアップ ===== 🔑 キーワード設定
-    m5_module_llm::ApiKwsSetupConfig_t kws_config;
-
-    kws_config.kws = "HELLO"; // キーワードはここで変更可能
-    kws_work_id = module_llm.kws.setup(kws_config, "kws_setup", "en_US");
-    wake_up_keyword = kws_work_id;
-    if (kws_work_id.isEmpty()) { // モデルの接続チェック
-        while (1);
-    }
-drawLoadingBarStep("Setup ASR..");
-
-
-
     // Setup ASR 
     m5_module_llm::ApiAsrSetupConfig_t asr_config;
     asr_config.input = {"sys.pcm", kws_work_id};
@@ -351,11 +330,6 @@ drawLoadingBarStep("Setup Audio mdule..");
         0.08f, 0.08f       // ← 画像サイズ縮小！！
     );
 
-// sendKwsCommand(kws_work_id, "pause"); // 停止
-
-// delay(500);  // 少し待つ 
-// sendKwsCommand(kws_work_id, "work");  // 開始 これをやったら，勝手にHello言われてる感じなってる
-// delay(500);  // 少し待つ
 
 }
 
@@ -369,11 +343,7 @@ void loop()
     
     /* 受信したメッセージを1つずつ処理 */
     for (auto& llm_msg : module_llm.msg.responseMsgList) { //responseMsgList: LLMモジュールから送られてきたメッセージのリスト
-        
-        // if (llm_msg.work_id == kws_work_id && kws_enabled) { /* ウェイクワード検出 HELLO */
-        // if (llm_msg.work_id == kws_work_id) { /* ウェイクワード検出 HELLO */
-        //     // UI    
-        // }
+
 
         /* If ASR module message */
         if (llm_msg.work_id == asr_work_id) { // キーワード検知
@@ -432,10 +402,5 @@ void loop()
 
     module_llm.msg.responseMsgList.clear();
 
-    // ===== KWS再開判定 =====
-    // if (!kws_enabled && millis() > kws_resume_time) {
-    //     ui.updateHeardText("OK!!"); 
-    //     sendKwsCommand(kws_work_id, "work"); // KWS再開
-    //     kws_enabled = true;
-    // }
+
 }
