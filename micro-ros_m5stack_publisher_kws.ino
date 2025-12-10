@@ -5,7 +5,6 @@
 #include <M5Unified.h>
 #include <M5ModuleLLM.h>
 #include <vector>
-#include "Logger.h"  // ヘッダファイル読み込み
 #include "UIManager.h"
 
 // マイクアイコン関係
@@ -24,6 +23,12 @@ UIManager ui;
 #include <rclc/executor.h>
 // #include <std_msgs/msg/string.h>
 #include <std_msgs/msg/int32.h>
+// ==========================
+
+// ========= KWS関連 =========
+bool kws_enabled = true;        // KWSが有効かどうか
+unsigned long kws_resume_time = 0; // KWS再開予定時間
+// ===========================
 
 
 // ===== LLM関連 =====
@@ -32,8 +37,8 @@ String melotts_work_id;
 String wake_up_keyword;
 String second_keyword;
 String asr_work_id;
-String kws_work_id; // 
-
+String kws_work_id; 
+// ===================
 
 // ===== micro-ROSオブジェクト =====
 rcl_publisher_t publisher;
@@ -43,17 +48,8 @@ rcl_allocator_t allocator;
 std_msgs__msg__Int32 msg;
 rcl_init_options_t init_options; // ドメインID設定関係のやつ
 size_t domain_id = 27; // ROS_DOMAIN_ID指定
-bool humble = true;
-bool claude = true; // デバッグ用
-// std_msgs__msg__String msg;
 // ==================================
 
-
-// ===== ログスクロール用 =====
-std::vector<LogEntry> logs;
-int scroll_index = 0;  // 今表示している行のインデックス
-int lines_per_screen = 7;  // 下半分に入る行数
-// ============================
 
 
 // ============ 命令 ==============
@@ -65,22 +61,20 @@ struct Command {  // 構造体を定義
 };
 // 定義した構造体の配列をつくる
 const Command command_table[] = { // キーワードのリスト
-    { " go",    "GO!!!",          "go.go",        11  }, // キーワード，表示，音声，トピック
-    { " stop",  "STOP!!",         "stop.stop",    0   }, // キーワードを指定する際，キーワードの前に空白を入れないと →
-    { " wait",  "WAIT!!",         "wait.wait",    0   }, // 認識をしてくれないため注意
-    { " right", "turn right!!",   "turn right",   3   },
-    { " left",  "turn left!!",    "turn left",    4   },
-    { " back",  "BACK!!",         "back.back",    10  },
-    { " slow",  "SLOW !!",        "slow.slow",    1   },
+    { " go",    "GO ",          "go.go",        11  }, // キーワード，表示，音声，トピック
+    { " stop",  "STOP ",         "stop.stop",    0   }, // キーワードを指定する際，キーワードの前に空白を入れないと →
+    { " wait",  "WAIT ",         "wait.wait",    0   }, // 認識をしてくれないため注意
+    { " right", "turn right ",   "turn right",   3   },
+    { " left",  "turn left ",    "turn left",    4   },
+    { " back",  "BACK ",         "back.back",    10  },
+    { " slow",  "SLOW ",        "slow.slow",    1   },
     { " dance", "DANCING",        "dancing",      6   },
-    { " spin",  "SPIN!",          "spin.spin",    99  }  // 一回転する
+    { " spin",  "SPIN",          "spin.spin",    99  }  // 一回転する
 };
 const int NUM_COMMANDS = sizeof(command_table) / sizeof(command_table[0]);
 // ================================
 
-// ===========================
-// ローディングバー管理
-// ===========================
+// ===== ローディングバー管理 =====
 int loadingSteps = 10;      // 何分割するか
 int currentStep = 0;        // 現在のステップ
 int barW = 250;
@@ -89,7 +83,7 @@ int barH = 18;
 int barX = (320 - barW) / 2;
 int barY = (240 - barH) / 2 + 20;
 String miniLog = "";
-
+// =================================
 
 // #defineはマクロ定義．右のをマクロ名に置き換え．
 #define RCCHECK(fn) { rcl_ret_t temp_rc = fn; if((temp_rc != RCL_RET_OK)){error_loop();}} // C言語の簡略エラーチェック
@@ -145,7 +139,6 @@ void drawMiniLog(String msg) {
 
     // 文字描画
     M5.Display.setTextSize(2);
-    // M5.Lcd.setTextFont(4);
     M5.Display.setTextColor(WHITE, BLACK);
     M5.Display.setCursor(x, y);
     M5.Display.print(miniLog);
@@ -165,6 +158,20 @@ void drawLoadingBarStep(String logMessage) {
 
         // 2) 左下に一行ログ
     drawMiniLog(logMessage);
+}
+
+// KWSを停止，起動する関数
+void sendKwsCommand(const String& workId, const String& action) {
+    String cmd = "{\"request_id\":\"2\",\"work_id\":\"" + workId +
+                 "\",\"action\":\"" + action + "\"}";
+    Serial2.println(cmd);
+}
+
+// ASRを停止，起動する関数
+void sendAsrCommand(const String& workId, const String& action) {
+    String cmd = "{\"request_id\":\"3\",\"work_id\":\"" + workId +
+                 "\",\"action\":\"" + action + "\"}";
+    Serial2.println(cmd);
 }
 
 
@@ -232,8 +239,6 @@ void setup()
 {
     M5.begin();
     initLoadingBar(10); 
-    // setTextScroll(); // テキスト設定
-    // addLog("Voice ROS Pub", TFT_CYAN); 
     drawLoadingBarStep("Check ModuleLLM connection..");
 
     // ===== Module LLM 初期化 =====
@@ -245,12 +250,9 @@ void setup()
     module_llm.begin(&Serial2);
 
     /* LLMmodule接続チェック */ 
-    // addLog(">> Check ModuleLLM connection..\n"); 
     while (!module_llm.checkConnection()) {
         delay(500);
-        // addLog(".");
     }
-    // addLog("ModuleLLM connected!");
     drawLoadingBarStep("Reset ModuleLLM.." );
 
     /* Reset ModuleLLM */
@@ -273,13 +275,11 @@ drawLoadingBarStep("Wi-Fi connection..");
     int wifi_wait = 0;
     while (WiFi.status() != WL_CONNECTED && wifi_wait < 20) {
         delay(200);
-        // addLog(".");
         wifi_wait++;
     }
-    // addLog("Wi-Fi ready");
 drawLoadingBarStep("micro-ROS setup..");
-    delay(2000);
 
+    delay(2000);
 
 
     // =====  micro-ROS 初期化 ===== ⚡
@@ -298,14 +298,16 @@ drawLoadingBarStep("micro-ROS setup..");
             delay(100);
         }
     }
-
 drawLoadingBarStep("LLM module connection..");
+
 
     while (!module_llm.checkConnection()) {
         delay(500);
     }
-
 drawLoadingBarStep("KWS setup..");
+
+
+
     // ===== KWSセットアップ ===== 🔑 キーワード設定
     m5_module_llm::ApiKwsSetupConfig_t kws_config;
 
@@ -313,10 +315,11 @@ drawLoadingBarStep("KWS setup..");
     kws_work_id = module_llm.kws.setup(kws_config, "kws_setup", "en_US");
     wake_up_keyword = kws_work_id;
     if (kws_work_id.isEmpty()) { // モデルの接続チェック
-        // addLog("\nKWS setup failed!");
         while (1);
     }
 drawLoadingBarStep("Setup ASR..");
+
+
 
     // Setup ASR 
     m5_module_llm::ApiAsrSetupConfig_t asr_config;
@@ -327,31 +330,33 @@ drawLoadingBarStep("Setup ASR..");
 drawLoadingBarStep("Setup Audio mdule..");
 
     /* Setup Audio module */
-    // addLog(">> Setup audio..");
     module_llm.audio.setup();
-   drawLoadingBarStep("setup TTS..");
+    drawLoadingBarStep("setup TTS..");
     delay(500);  // 少し待つ
 
     /* Setup TTS module and save returned work id 📝→🎤*/ 
-    // addLog(">> Setup tts..");
     m5_module_llm::ApiMelottsSetupConfig_t melotts_config;
     melotts_work_id = module_llm.melotts.setup(melotts_config, "melotts_setup", "en_US");
 
-
     delay(2000);  // 少し待つ
  
-    // addLog("junbe kanryou!", TFT_GREEN);
     /* TTSで音声出力（10秒タイムアウト） */ 
     // module_llm.melotts.inference(melotts_work_id, "OK!", 5000);
-    ui.begin();
 
+    ui.begin();
     ui.updateStatus(true);
-    // M5.Display.drawPngFile("/micro_white.png", 600,60,30);
     M5.Display.drawPng(micro_white,micro_white_len, 3, 30, // マイクアイコン表示
         0, 0,            // maxWidth, maxHeight（0 なら無視）
         0, 0,            // offX, offY
         0.08f, 0.08f       // ← 画像サイズ縮小！！
     );
+
+// sendKwsCommand(kws_work_id, "pause"); // 停止
+
+// delay(500);  // 少し待つ 
+// sendKwsCommand(kws_work_id, "work");  // 開始 これをやったら，勝手にHello言われてる感じなってる
+// delay(500);  // 少し待つ
+
 }
 
 
@@ -361,17 +366,17 @@ void loop()
     module_llm.update();
     ui.tickCursor();
 
-
     
     /* 受信したメッセージを1つずつ処理 */
     for (auto& llm_msg : module_llm.msg.responseMsgList) { //responseMsgList: LLMモジュールから送られてきたメッセージのリスト
         
-        if (llm_msg.work_id == kws_work_id) { /* ウェイクワード検出 HELLO */
-            // addLog(">> Keyword detected", TFT_GREENYELLOW);
-        }
+        // if (llm_msg.work_id == kws_work_id && kws_enabled) { /* ウェイクワード検出 HELLO */
+        // if (llm_msg.work_id == kws_work_id) { /* ウェイクワード検出 HELLO */
+        //     // UI    
+        // }
 
         /* If ASR module message */
-        if (llm_msg.work_id == asr_work_id) {
+        if (llm_msg.work_id == asr_work_id) { // キーワード検知
             /* Check message object type */
             if (llm_msg.object == "asr.utf-8.stream") {
                 /* ASR結果の取り出し */
@@ -379,15 +384,12 @@ void loop()
                 deserializeJson(doc, llm_msg.raw_msg);
                 String asr_result = doc["data"]["delta"].as<String>();
 
-                // M5.Display.printf(">> %s\n", asr_result.c_str()); 
-                // addLog(asr_result.c_str(), TFT_YELLOW); // 検出した文字を表示
-                ui.updateHeardText(asr_result.c_str());
+                ui.updateHeardText(asr_result.c_str()); // 聞き取り音声表示
 
                 for (int i = 0; i < NUM_COMMANDS; i++) { // キーワードごとの処理を実行
                     if (asr_result == command_table[i].name) {
 
-                        // addLog(command_table[i].log_text); // ログ記述
-                        ui.updateKeyword(command_table[i].log_text);
+                        ui.updateKeyword(command_table[i].log_text); // キーワード表示
 
                         module_llm.melotts.inference( // 声で知らせる
                             melotts_work_id,
@@ -398,9 +400,6 @@ void loop()
                         msg.data = command_table[i].value;
                         RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL)); // topicの送信
 
-                        // ui.updateRobotState("nanikashira");
-
-                        // addLog(String("Topic sent: ") + msg.data, TFT_CYAN);
                         delay(500);
 
                         break;
@@ -414,23 +413,16 @@ void loop()
 
     // ボタン操作でスクロール 🔘
     if (M5.BtnA.wasPressed()) {
-        scroll_index = max(0, scroll_index - 1);
-        drawLogs();
+        sendAsrCommand(asr_work_id, "work");
     }
     if (M5.BtnC.wasPressed()) {
-        int max_scroll = max(0, (int)logs.size() - lines_per_screen);
-        scroll_index = min(max_scroll, scroll_index + 1);
-        drawLogs();
-        
     }
+
     // テスト：Bボタンで🐢停止
     if (M5.BtnB.wasPressed()) {
-        static int n = 0;
         ui.drawStopButton(true);   // 黄色にする
-        // addLog("Log %d", n++);
         msg.data = 0;  // 停止！！！
         RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
-        // addLog("Topic sent: 0", TFT_CYAN);
         delay(500);
     }
     // Bボタン離したとき
@@ -438,6 +430,12 @@ void loop()
         ui.drawStopButton(false);  // 白に戻す
     }
 
-    // RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL));
     module_llm.msg.responseMsgList.clear();
+
+    // ===== KWS再開判定 =====
+    // if (!kws_enabled && millis() > kws_resume_time) {
+    //     ui.updateHeardText("OK!!"); 
+    //     sendKwsCommand(kws_work_id, "work"); // KWS再開
+    //     kws_enabled = true;
+    // }
 }
