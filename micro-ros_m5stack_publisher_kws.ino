@@ -14,6 +14,11 @@ extern const unsigned int micro_white_len;
 // UI関係
 UIManager ui;
 
+// Aボタン系の関数
+unsigned long asr_end_time = 0;
+bool asr_active = false;
+
+
 
 // ===== micro-ROS関連 =====
 #include <micro_ros_arduino.h>
@@ -59,15 +64,16 @@ struct Command {  // 構造体を定義
     const char* tts_file;  // 音声メッセージ
     int value;             // topicの値
 };
+
 // 定義した構造体の配列をつくる
 const Command command_table[] = { // キーワードのリスト
-    { " go",    "GO ",          "go.go",        11  }, // キーワード，表示，音声，トピック
-    { " stop",  "STOP ",         "stop.stop",    0   }, // キーワードを指定する際，キーワードの前に空白を入れないと →
-    { " wait",  "WAIT ",         "wait.wait",    0   }, // 認識をしてくれないため注意
+    { " go",    "GO ",          "go",        11  }, // キーワード，表示，音声，トピック
+    { " stop",  "STOP ",         "stop",    0   }, // キーワードを指定する際，キーワードの前に空白を入れないと →
+    { " wait",  "WAIT ",         "wait",    0   }, // 認識をしてくれないため注意
     { " right", "turn right ",   "turn right",   3   },
     { " left",  "turn left ",    "turn left",    4   },
-    { " back",  "BACK ",         "back.back",    10  },
-    { " slow",  "SLOW ",        "slow.slow",    1   },
+    { " back",  "BACK ",         "back",    10  },
+    { " slow",  "SLOW ",        "slow",    1   },
     { " dance", "DANCING",        "dancing",      6   },
     { " spin",  "SPIN",          "spin.spin",    99  }  // 一回転する
 };
@@ -253,7 +259,7 @@ void setup()
     module_llm.sys.reset();
     delay(500);  // 少し待つ
 
-drawLoadingBarStep("micro-ROS connection..");
+    drawLoadingBarStep("micro-ROS connection..");
 
     // ===== micro-ROS接続 =====
     int target_agent = 0; // 0 = PC ; 1= Jetson
@@ -264,14 +270,14 @@ drawLoadingBarStep("micro-ROS connection..");
         set_microros_wifi_transports("GL-AR750S-064", "goodlife", "192.168.8.233", 8888);
     }
 
-drawLoadingBarStep("Wi-Fi connection..");
+    drawLoadingBarStep("Wi-Fi connection..");
     // Wi-Fi接続待機（確実に接続完了を待つ）📡
     int wifi_wait = 0;
     while (WiFi.status() != WL_CONNECTED && wifi_wait < 20) {
         delay(200);
         wifi_wait++;
     }
-drawLoadingBarStep("micro-ROS setup..");
+    drawLoadingBarStep("micro-ROS setup..");
 
     delay(2000);
 
@@ -279,7 +285,7 @@ drawLoadingBarStep("micro-ROS setup..");
     // =====  micro-ROS 初期化 ===== ⚡
     RCSOFTCHECK(rclc_executor_spin_some(NULL, RCL_MS_TO_NS(100)));
 
-    if (!initMicroROS()) {
+    if (!initMicroROS()) { // micro-rosが起動していない場合
         // 一回だけ表示
         M5.Display.fillScreen(BLACK);
         M5.Display.setCursor(10, 40);
@@ -292,13 +298,13 @@ drawLoadingBarStep("micro-ROS setup..");
             delay(100);
         }
     }
-drawLoadingBarStep("LLM module connection..");
+    drawLoadingBarStep("LLM module connection..");
 
 
     while (!module_llm.checkConnection()) {
         delay(500);
     }
-drawLoadingBarStep("KWS setup..");
+    drawLoadingBarStep("KWS setup..");
 
     // Setup ASR 
     m5_module_llm::ApiAsrSetupConfig_t asr_config;
@@ -306,7 +312,8 @@ drawLoadingBarStep("KWS setup..");
     asr_work_id = module_llm.asr.setup(asr_config, "asr_setup", "en_US");
     if (asr_work_id.isEmpty()) { // エラー
     }
-drawLoadingBarStep("Setup Audio mdule..");
+    sendAsrCommand(asr_work_id, "pause"); // ASRを停止
+    drawLoadingBarStep("Setup Audio mdule..");
 
     /* Setup Audio module */
     module_llm.audio.setup();
@@ -323,7 +330,6 @@ drawLoadingBarStep("Setup Audio mdule..");
     // module_llm.melotts.inference(melotts_work_id, "OK!", 5000);
 
     ui.begin();
-    ui.updateStatus(true);
     M5.Display.drawPng(micro_white,micro_white_len, 3, 30, // マイクアイコン表示
         0, 0,            // maxWidth, maxHeight（0 なら無視）
         0, 0,            // offX, offY
@@ -339,6 +345,7 @@ void loop()
     M5.update(); 
     module_llm.update();
     ui.tickCursor();
+    ui.animateRect();   // アニメーション用
 
     
     /* 受信したメッセージを1つずつ処理 */
@@ -358,14 +365,25 @@ void loop()
 
                 for (int i = 0; i < NUM_COMMANDS; i++) { // キーワードごとの処理を実行
                     if (asr_result == command_table[i].name) {
-
+                        
                         ui.updateKeyword(command_table[i].log_text); // キーワード表示
+
+                        // ASR受付停止
+                        sendAsrCommand(asr_work_id, "pause");
+                        ui.drawStartButton(false);
+                        ui.updateStatus(false);
+                        asr_active = false;  // フラグをオフ
+                        
 
                         module_llm.melotts.inference( // 声で知らせる
                             melotts_work_id,
                             command_table[i].tts_file,
-                            2000
+                            0 // これで非同期にできた
                         );
+
+                        ui.startRectAnimation(1500);  // 口を動かす ttsに阻まれる？
+
+                        
 
                         msg.data = command_table[i].value;
                         RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL)); // topicの送信
@@ -379,12 +397,48 @@ void loop()
         }
     }
     
-    
+    // ASR受付停止
+    if (asr_active && millis() > asr_end_time) {
+        sendAsrCommand(asr_work_id, "pause");
+        ui.drawStartButton(false);
+        ui.updateStatus(false);
 
-    // ボタン操作でスクロール 🔘
-    if (M5.BtnA.wasPressed()) {
-        sendAsrCommand(asr_work_id, "work");
+        asr_active = false;  // フラグをオフ
     }
+
+    // Aボタン操作
+    if (M5.BtnA.wasPressed()) { // 左ボタン
+
+        if (!asr_active) { // ASRが起動中でない場合
+            // ASR開始
+            sendAsrCommand(asr_work_id, "work");
+            ui.drawStartButton(true);
+            ui.updateStatus(true); 
+            asr_active = true;
+            asr_end_time = millis() + 7000;  // 7秒後にASR受付停止
+        }
+        else {
+            // ASR動作中にもう一度押された → 停止 & リセット 色を白に．
+            sendAsrCommand(asr_work_id, "pause");
+            ui.drawStartButton(false);
+            ui.updateStatus(false);
+            asr_active = false;   // フラグをオフ
+        }
+
+        // sendAsrCommand(asr_work_id, "work");
+        // M5.Speaker.setVolume(10);
+        // ui.drawStartButton(true);
+
+        // M5.Speaker.tone(440, 200);  //800Hzの音を200msec鳴らす
+        // delay(200);
+        // M5.Speaker.tone( 400, 100, 0, true);
+        // delay(200);
+        // M5.Speaker.tone(1200, 100, 0, false);
+        // delay(200);
+        // M5.Speaker.stop();          //音を止める
+
+    }
+
     if (M5.BtnC.wasPressed()) {
     }
 
