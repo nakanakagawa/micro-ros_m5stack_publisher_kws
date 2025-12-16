@@ -18,6 +18,10 @@ UIManager ui;
 unsigned long asr_end_time = 0;
 bool asr_active = false;
 
+// ASR関係
+unsigned long last_command_time = 0;
+const unsigned long COMMAND_COOLDOWN = 1500; // 1.5秒間は同じコマンド無視
+
 
 
 // ===== micro-ROS関連 =====
@@ -53,6 +57,8 @@ rcl_allocator_t allocator;
 std_msgs__msg__Int32 msg;
 rcl_init_options_t init_options; // ドメインID設定関係のやつ
 size_t domain_id = 27; // ROS_DOMAIN_ID指定
+rclc_executor_t executor;
+
 // ==================================
 
 
@@ -67,13 +73,13 @@ struct Command {  // 構造体を定義
 
 // 定義した構造体の配列をつくる
 const Command command_table[] = { // キーワードのリスト
-    { " go",    "GO ",          "go",        11  }, // キーワード，表示，音声，トピック
-    { " stop",  "STOP ",         "stop",    0   }, // キーワードを指定する際，キーワードの前に空白を入れないと →
-    { " wait",  "WAIT ",         "wait",    0   }, // 認識をしてくれないため注意
+    { " go",    "GO ",          "go.go",        11  }, // キーワード，表示，音声，トピック
+    { " stop",  "STOP ",         "stop.stop",    0   }, // キーワードを指定する際，キーワードの前に空白を入れないと →
+    { " wait",  "WAIT ",         "wait.wait",    0   }, // 認識をしてくれないため注意
     { " right", "turn right ",   "turn right",   3   },
     { " left",  "turn left ",    "turn left",    4   },
-    { " back",  "BACK ",         "back",    10  },
-    { " slow",  "SLOW ",        "slow",    1   },
+    { " back",  "BACK ",         "back.back",    10  },
+    { " slow",  "SLOW ",        "slow.slow",    1   },
     { " dance", "DANCING",        "dancing",      6   },
     { " spin",  "SPIN",          "spin.spin",    99  }  // 一回転する
 };
@@ -230,6 +236,13 @@ bool initMicroROS() { // pub設定
         return false;
     }  
 
+        // ===== ここ！！！executor 作成 =====
+    RCCHECK(rclc_executor_init(
+        &executor,
+        &support.context,
+        1,              // ハンドラ数（今は1でOK）
+        &allocator));
+
     return true;
 }
 
@@ -262,7 +275,7 @@ void setup()
     drawLoadingBarStep("micro-ROS connection..");
 
     // ===== micro-ROS接続 =====
-    int target_agent = 0; // 0 = PC ; 1= Jetson
+    int target_agent = 1; // 0 = PC ; 1= Jetson
 
     if (target_agent == 0) {
         set_microros_wifi_transports("Buffalo-2G-0768", "h33833p5wu8k6", "192.168.11.16", 8888);
@@ -279,7 +292,7 @@ void setup()
     }
     drawLoadingBarStep("micro-ROS setup..");
 
-    delay(2000);
+    delay(3000);
 
 
     // =====  micro-ROS 初期化 ===== ⚡
@@ -301,6 +314,9 @@ void setup()
     drawLoadingBarStep("LLM module connection..");
 
 
+    delay(2000);  // こいつで，WiFi 変更時のASR動かない問題が解決したかも
+
+
     while (!module_llm.checkConnection()) {
         delay(500);
     }
@@ -313,16 +329,23 @@ void setup()
     if (asr_work_id.isEmpty()) { // エラー
     }
     sendAsrCommand(asr_work_id, "pause"); // ASRを停止
-    drawLoadingBarStep("Setup Audio mdule..");
 
+    drawLoadingBarStep("Setup Audio mdule..");
+    delay(1000);  // 少し待つ
     /* Setup Audio module */
     module_llm.audio.setup();
     drawLoadingBarStep("setup TTS..");
-    delay(500);  // 少し待つ
+    delay(1500);  // 少し待つ
 
     /* Setup TTS module and save returned work id 📝→🎤*/ 
     m5_module_llm::ApiMelottsSetupConfig_t melotts_config;
     melotts_work_id = module_llm.melotts.setup(melotts_config, "melotts_setup", "en_US");
+
+    delay(5000);  // 代わりに待つ
+
+    // TTSがない方が応答がいいなー多分
+
+    
 
     delay(2000);  // 少し待つ
  
@@ -346,6 +369,7 @@ void loop()
     module_llm.update();
     ui.tickCursor();
     ui.animateRect();   // アニメーション用
+    rclc_executor_spin_some(&executor, RCL_MS_TO_NS(10));
 
     
     /* 受信したメッセージを1つずつ処理 */
@@ -365,6 +389,12 @@ void loop()
 
                 for (int i = 0; i < NUM_COMMANDS; i++) { // キーワードごとの処理を実行
                     if (asr_result == command_table[i].name) {
+
+                                // ★ クールダウン中なら無視
+                        if (millis() - last_command_time < COMMAND_COOLDOWN) {
+                            break;
+                        }
+                        last_command_time = millis(); // ★ 時刻を記録
                         
                         ui.updateKeyword(command_table[i].log_text); // キーワード表示
 
@@ -384,12 +414,10 @@ void loop()
                         ui.startRectAnimation(1500);  // 口を動かす ttsに阻まれる？
 
                         
-
                         msg.data = command_table[i].value;
                         RCSOFTCHECK(rcl_publish(&publisher, &msg, NULL)); // topicの送信
 
                         delay(500);
-
                         break;
                     }
                 }
